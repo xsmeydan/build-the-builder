@@ -11,6 +11,9 @@ import datetime
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+NAMES = dict(en=(WEEKDAYS, MONTHS),
+             tr=(["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"],
+                 ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]))
 
 
 def d(value):
@@ -136,10 +139,14 @@ def in_time_window(hhmm, start="00:00", end="23:59"):
         return False
 
 
-def say(day, with_year=False):
-    """A date for speech: 'Friday 23 October' (or with the year)."""
+def say(day, with_year=False, lang="en"):
+    """A date for speech: 'Friday 23 October' ('23 Ekim Cuma' for lang='tr'), optionally with the year."""
     if day is None: return ""
-    s = WEEKDAYS[day.weekday()] + " " + str(day.day) + " " + MONTHS[day.month - 1]
+    wd, mo = NAMES.get(lang, NAMES["en"])
+    if lang == "tr":
+        s = str(day.day) + " " + mo[day.month - 1] + (" " + str(day.year) if with_year else "") + " " + wd[day.weekday()]
+        return s
+    s = wd[day.weekday()] + " " + str(day.day) + " " + mo[day.month - 1]
     return s + " " + str(day.year) if with_year else s
 
 

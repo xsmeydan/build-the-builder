@@ -13,7 +13,8 @@ Do this before you write any workflow or code. The agent is built from `spec.md`
 
 ### Read everything
 
-- Read every file in `input/` from start to end, then `tools/openapi.json`. Do not skim and do not stop at the first table.
+- Read every file in `input/` from start to end (Word, PDF and Excel files through their `.txt` twins), then the tool API: `tools/openapi.json` when it exists, otherwise the service contract among the documents. Do not skim and do not stop at the first table.
+- Example conversations, when given, show the bank's wording, tone and order of the call. Use their sentences where the rules allow it, and list where an example contradicts a written rule (the rule wins).
 - If several briefs are given, the last one is the brief to build for. Earlier ones are what it builds on: every earlier rule still applies unless a later one replaces it.
 - The material may not be a clean specification. It can be emails, policy extracts, memos, meeting notes, call transcripts, chat messages, code lists or tables, in any order. Treat every piece as evidence. For each piece note its type, its date, who wrote or said it and in what role, and its status (draft, proposal, approved, replaced).
 - Rules hide in footnotes, table notes, a "PS" at the end of a mail, an aside in a transcript, or the description of a field in `tools/openapi.json`. Read those too.
@@ -213,9 +214,9 @@ Write these into the prompts and extraction descriptions of every node that coll
 
 ## 3. Write the tools from the tool API file
 
-Generate every tool definition from `tools/openapi.json` with a script. Never type a URL, field name or allowed value by hand: the final briefs come with their own tool API file, and its fields and values can differ.
+Generate every tool definition with a script from the tool API: `tools/openapi.json` when it exists, otherwise the service contract in the documents (write its services into a small machine-readable table first, then generate from that). Never type a URL, field name or allowed value by hand in the workflow. When your instructions give a mock bank URL, it is the server for every tool.
 
-- One tool per path. Its name is the path without the slash. Its `url` is the server URL plus the path, its `method` the path's method, both as `default`.
+- One tool per service. Its name is the service's name. Its `url` is the server URL plus the path, its `method` the service's method, both as `default`.
 - Each request field becomes a leaf under `body.properties` with the field's `type`, `description` and `enum` copied from the file, and the file's `required` list.
 - Give every leaf a `default`:
   - `customer_id` and every value the workflow already knows (ids, amounts and dates that code computed, outcomes): `{{<variable>}}`, so the value is baked and the model never sees the field.

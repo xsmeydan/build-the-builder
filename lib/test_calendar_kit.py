@@ -59,6 +59,7 @@ eq(in_time_window("9", "10:00", "19:00"), False, "unreadable")
 
 # speech and prompt texts
 eq(say(d("2026-10-23")), "Friday 23 October", "say")
+eq(say(d("2026-10-23"), lang="tr"), "23 Ekim Cuma", "say in Turkish")
 table = date_table_text(today, [("early", early), ("late", late)], cal, days=14)
 eq("2026-10-26 Mon holiday | early: offer Tuesday 27 October | late: after deadline, offer Friday 23 October" in table, True, "table holiday row")
 eq("next Friday = Friday 23 October" in relative_dates_text(today, cal), True, "relative text")

@@ -1,7 +1,8 @@
 """The builder: reads a bank's brief and builds a Freya phone agent, with no manual step.
 
     source env.sh
-    python3 builder/build.py <brief_path> <tool_api_path>                                  # the submission command
+    python3 builder/build.py <case_folder> <mock_url>                                      # the final: a folder of bank documents
+    python3 builder/build.py <brief_path> <tool_api_path>                                  # a single brief with its tool API file
     python3 builder/build.py briefs/brief-a.md tools/openapi.json --practice A             # practice
     python3 builder/build.py briefs/brief-b.md tools/openapi.json --base briefs/brief-a.md --practice B
 
@@ -42,14 +43,50 @@ print(f"{left:.1f} minutes left of {d['limit_min']:.0f}. A test run takes 2 to 1
 def now(): return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def to_text(src, dst_dir):
+    """Write a .txt twin of a Word, PDF, Excel or RTF file so it can be read. Returns the twin's name or None."""
+    import subprocess
+    out = dst_dir / (src.name + ".txt"); ext = src.suffix.lower()
+    try:
+        if ext in (".docx", ".doc", ".rtf", ".odt", ".pages"):
+            subprocess.run(["textutil", "-convert", "txt", "-output", str(out), str(src)], check=True, capture_output=True, timeout=60)
+        elif ext == ".pdf":
+            subprocess.run(["pdftotext", "-layout", str(src), str(out)], check=True, capture_output=True, timeout=60)
+        elif ext in (".xlsx", ".xlsm", ".xls"):
+            import openpyxl
+            wb = openpyxl.load_workbook(src, data_only=True); lines = []
+            for ws in wb.worksheets:
+                lines.append(f"## sheet: {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    if any(c is not None for c in row): lines.append(" | ".join("" if c is None else str(c) for c in row))
+            out.write_text("\n".join(lines))
+        else:
+            return None
+        return out.name
+    except Exception as e:
+        out.write_text(f"(could not convert {src.name}: {e}. Read the original file.)"); return out.name
+
+
 def prepare_workdir(briefs, api_file, slot, started):
-    """A fresh folder with this run's inputs only. Kit tools are linked so they keep writing to the kit's results/."""
+    """A fresh folder with this run's inputs only. Kit tools are linked so they keep writing to the kit's results/.
+
+    A brief may be a folder of bank documents (Markdown, Word, PDF, Excel): every file is copied into input/ with a .txt
+    twin for the formats that need converting. api_file is a tool API file, or the URL of the mock bank (then None here)."""
     run = KIT / "runs" / f"{slot}-{time.strftime('%Y%m%d-%H%M%S')}"
     (run / "input").mkdir(parents=True)
     (run / "tools").mkdir()
-    for b in briefs: shutil.copy(b, run / "input" / pathlib.Path(b).name)
-    shutil.copy(api_file, run / "input" / "openapi.json")
-    shutil.copy(api_file, run / "tools" / "openapi.json")          # the docs and skill call it tools/openapi.json
+    for b in briefs:
+        b = pathlib.Path(b)
+        if b.is_dir():
+            for f in sorted(x for x in b.rglob("*") if x.is_file() and not x.name.startswith(".")):
+                dst = run / "input" / f.relative_to(b); dst.parent.mkdir(parents=True, exist_ok=True); shutil.copy(f, dst)
+                to_text(f, dst.parent)
+                if f.name.lower() in ("openapi.json", "openapi.yaml", "openapi.yml") and not api_file: shutil.copy(f, run / "tools" / f.name)
+        else:
+            shutil.copy(b, run / "input" / b.name)
+    if api_file:
+        shutil.copy(api_file, run / "input" / "openapi.json")
+        shutil.copy(api_file, run / "tools" / "openapi.json")      # the docs and skill call it tools/openapi.json
     for name in ("run_cases.py", "score.py"): (run / "tools" / name).symlink_to(KIT / "tools" / name)
     shutil.copytree(KIT / "docs", run / "docs")
     (run / "lib").mkdir(); shutil.copy(KIT / "lib" / "calendar_kit.py", run / "lib" / "calendar_kit.py")   # tested, brief-free helpers
@@ -99,8 +136,8 @@ def purpose(block):
 
 async def main():
     ap = argparse.ArgumentParser(description="Build a Freya phone agent from a bank's brief.")
-    ap.add_argument("brief", help="the brief to build a phone agent for")
-    ap.add_argument("api", help="the bank's tool API file for this brief")
+    ap.add_argument("brief", help="the brief to build a phone agent for: a file, or a folder of the bank's documents")
+    ap.add_argument("api", help="the bank's tool API file, or the URL of the mock bank the phone agent must call")
     ap.add_argument("--base", nargs="*", default=[], help="briefs this one builds on, if any")
     ap.add_argument("--slot", help="Freya slot name (default: the brief's file name without .md)")
     ap.add_argument("--practice", choices=["A", "B"], help="practice customers that fit these briefs. Leave it out for a brief they do not cover")
@@ -108,8 +145,9 @@ async def main():
     a.briefs = list(a.base) + [a.brief]
     slot = a.slot or pathlib.Path(a.brief).stem
     started = time.time()
-    run = prepare_workdir(a.briefs, a.api, slot, started)
-    tester = chat_test_customer()
+    mock_url = a.api.rstrip("/") if a.api.startswith("http") else None
+    run = prepare_workdir(a.briefs, None if mock_url else a.api, slot, started)
+    tester = None if mock_url else chat_test_customer()           # the workspace's test customer belongs to the practice bank
     if tester: (run / "input" / "chat_test_customer.json").write_text(json.dumps(tester, indent=1))
     log_lines_before = sum(1 for _ in open(KIT / "results" / "log.jsonl")) if (KIT / "results" / "log.jsonl").exists() else 0
     state_before = json.loads((KIT / ".freya-agents.json").read_text()).get(slot)
@@ -130,7 +168,7 @@ async def main():
     tw(f"# Builder trace: {slot}\n")
     tw(f"- start: {now()}")
     tw(f"- briefs: {', '.join(a.briefs)}")
-    tw(f"- tool API file: {a.api}")
+    tw(f"- tool API: {a.api}")
     tw(f"- builder model: {MODEL} (Claude Agent SDK, skill build-phone-agent)")
     tw(f"- phone agent model: {freya.AGENT_LLM['model']} (set by the event, not by the builder)")
     tw(f"- run folder: {run.relative_to(KIT)}")
@@ -140,9 +178,16 @@ async def main():
     tw("| time | model | purpose |")
     tw("|---|---|---|")
 
-    names = ", ".join("input/" + pathlib.Path(b).name for b in a.briefs)
-    context = (f"Briefs: {names}. The last one is the brief to build for; any earlier one is a brief it builds on.\n"
-               f"The bank's tool API for these briefs: tools/openapi.json.\n"
+    names = ", ".join("input/" + pathlib.Path(b).name + ("/ (a folder of documents)" if pathlib.Path(b).is_dir() else "") for b in a.briefs)
+    if pathlib.Path(a.brief).is_dir(): names = "every file in input/ (the bank's documents for this case)"
+    api_line = (f"The phone agent's tools call the bank's services at {mock_url} (a mock bank that follows the service contract in the documents). "
+                f"Use this URL as the server for every tool; take paths, fields and values from the service contract"
+                + (" and tools/openapi.json" if any((run / "tools").glob("openapi.*")) else "") + ".\n") if mock_url else \
+               "The bank's tool API for these briefs: tools/openapi.json.\n"
+    context = (f"Briefs: {names}. When several briefs are listed, the last one is the brief to build for and earlier ones are what it builds on.\n"
+               "Word, PDF and Excel files have a .txt twin next to them; read the twin, and the original when the twin is unclear.\n"
+               "The phone agent speaks the language of the bank's documents and example conversations, and uses their wording.\n"
+               + api_line +
                f"Slot: {slot}. Save with this slot name and no other.\n"
                f"Work only inside the current folder. Do not read or copy files from parent folders or from earlier runs.\n")
     context += (
@@ -233,6 +278,9 @@ async def main():
         try:
             exported = freya.export_workflow(state_after["workflow_id"], str(run / f"{slot}.workflow.json"))
             tw(f"- exported to `{pathlib.Path(exported).relative_to(KIT)}`")
+            if mock_url:                                           # the submission layout: submission/final.workflow.json
+                (KIT / "submission").mkdir(exist_ok=True); shutil.copy(exported, KIT / "submission" / "final.workflow.json")
+                tw("- copied to `submission/final.workflow.json`")
         except Exception as e:
             tw(f"- export failed: {e}")
     else:
