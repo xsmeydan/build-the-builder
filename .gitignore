@@ -1,0 +1,17 @@
+# secrets and local state
+env.sh
+.env
+.personas.json
+.chat-test-customer.json
+.freya-agents.json
+# run output (final runs are added on purpose with git add -f)
+runs/
+results/
+out/
+gen/
+traces/
+# noise
+__pycache__/
+*.pyc
+.DS_Store
+.qodo/
