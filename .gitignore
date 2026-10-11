@@ -15,3 +15,6 @@ __pycache__/
 *.pyc
 .DS_Store
 .qodo/
+
+mock/node_modules/
+mock/.wrangler/
